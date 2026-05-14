@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CodeCraft | Admin Secured</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0d1117; color: #c9d1d9; }
+        .bg-panel { background-color: #161b22; border: 1px solid #30363d; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCb03fkh-5y6kWfjAvoVrwzhSW5dbb6QXY",
+            authDomain: "vcode-9ebcf.firebaseapp.com",
+            projectId: "vcode-9ebcf",
+            storageBucket: "vcode-9ebcf.firebasestorage.app",
+            messagingSenderId: "448989915791",
+            appId: "1:448989915791:web:0930e6ec0d38a074ebdefa",
+            measurementId: "G-X1ZFMQG1PP"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide && iconRef.current) {
+                    iconRef.current.innerHTML = `<i data-lucide="${name}"></i>`;
+                    window.lucide.createIcons({
+                        root: iconRef.current,
+                        attrs: { width: size, height: size, class: className }
+                    });
+                }
+            }, [name, size, className]);
+            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+            const [authError, setAuthError] = useState('');
+            const [loginEmail, setLoginEmail] = useState('');
+            const [loginPassword, setLoginPassword] = useState('');
+            const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+            const [activeMenu, setActiveMenu] = useState('dashboard');
+            const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
+            const [confirmDelete, setConfirmDelete] = useState(null);
+            const [toast, setToast] = useState(null);
+            
+            const [ideas, setIdeas] = useState([]);
+            const [projects, setProjects] = useState([]);
+            const [gallery, setGallery] = useState([]);
+            
+            const [editingProject, setEditingProject] = useState(null);
+            const [editingGallery, setEditingGallery] = useState(null);
+
+            // Form States - UPDATED: Added developer field
+            const [projForm, setProjForm] = useState({ 
+                title: '', 
+                desc: '', 
+                demoUrl: '', 
+                thumbnail: '',
+                developer: '' // New Field
+            });
+            const [galForm, setGalForm] = useState({ caption: '', photoUrl: '' });
+
+            const showToast = (message, type = 'success') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 3000);
+            };
+
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+                    if (currentUser) {
+                        if (currentUser.email === "putrivanessa092@gmail.com") {
+                            setUser(currentUser);
+                            setAuthError('');
+                        } else {
+                            auth.signOut();
+                            setAuthError('Akses Ditolak: Anda bukan Admin CodeCraft.');
+                            setUser(null);
+                        }
+                    } else {
+                        setUser(null);
+                    }
+                    setAuthLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsubIdeas = db.collection('ideas').orderBy('timestamp', 'desc').onSnapshot(snap => {
+                    setIdeas(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubProj = db.collection('projects').onSnapshot(snap => {
+                    setProjects(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubGal = db.collection('gallery').onSnapshot(snap => {
+                    setGallery(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                return () => { unsubIdeas(); unsubProj(); unsubGal(); };
+            }, [user]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setAuthError('');
+                setIsLoggingIn(true);
+                try {
+                    await auth.signInWithEmailAndPassword(loginEmail, loginPassword);
+                } catch (error) {
+                    setAuthError(`Gagal Login: ${error.message}`);
+                    setLoginPassword('');
+                } finally {
+                    setIsLoggingIn(false);
+                }
+            };
+
+            const handleLogout = () => auth.signOut();
+
+            const handleProjectSubmit = async (e) => {
+                e.preventDefault();
+                try {
+                    if (editingProject) {
+                        await db.collection('projects').doc(editingProject).update(projForm);
+                        showToast("Project berhasil diupdate!");
+                        setEditingProject(null);
+                    } else {
+                        await db.collection('projects').add(projForm);
+                        showToast("Project berhasil ditambahkan!");
+                    }
+                    setProjForm({ title: '', desc: '', demoUrl: '', thumbnail: '', developer: '' });
+                } catch (e) {
+                    showToast("Gagal menyimpan project: " + e.message, 'error');
+                }
+            };
+
+            const editProject = (p) => {
+                setProjForm({ 
+                    title: p.title, 
+                    desc: p.desc, 
+                    demoUrl: p.demoUrl, 
+                    thumbnail: p.thumbnail || '',
+                    developer: p.developer || '' // Load developer name
+                });
+                setEditingProject(p.id);
+                document.getElementById('project-form-container').scrollIntoView({ behavior: 'smooth' });
+            };
+
+            const cancelEditProject = () => {
+                setProjForm({ title: '', desc: '', demoUrl: '', thumbnail: '', developer: '' });
+                setEditingProject(null);
+            };
+
+            const handleGallerySubmit = async (e) => {
+                e.preventDefault();
+                try {
+                    if (editingGallery) {
+                        await db.collection('gallery').doc(editingGallery).update(galForm);
+                        showToast("Foto berhasil diupdate!");
+                        setEditingGallery(null);
+                    } else {
+                        await db.collection('gallery').add(galForm);
+                        showToast("Foto berhasil ditambahkan!");
+                    }
+                    setGalForm({ caption: '', photoUrl: '' });
+                } catch (e) {
+                    showToast("Gagal menyimpan foto: " + e.message, 'error');
+                }
+            };
+
+            const executeDelete = async () => {
+                if(!confirmDelete) return;
+                try {
+                    await db.collection(confirmDelete.collection).doc(confirmDelete.id).delete();
+                    showToast("Data berhasil dihapus!");
+                    setConfirmDelete(null);
+                } catch (error) {
+                    showToast("Gagal menghapus: " + error.message, 'error');
+                    setConfirmDelete(null);
+                }
+            };
+
+            const menuItems = [
+                { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard' },
+                { id: 'moderasi', label: 'Moderasi Ide', icon: 'lightbulb' },
+                { id: 'project', label: 'Kelola Project', icon: 'folder-code' },
+                { id: 'galeri', label: 'Galeri Kegiatan', icon: 'image' }
+            ];
+
+            if (authLoading) return <div className="h-screen flex items-center justify-center text-white bg-[#0d1117]"><Icon name="loader" className="animate-spin text-indigo-500 mr-2" /> Memeriksa Akses...</div>;
+
+            if (!user) {
+                return (
+                    <div className="h-screen flex items-center justify-center p-4">
+                        <div className="bg-panel p-8 rounded-2xl w-full max-w-sm text-center shadow-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-600"></div>
+                            <h2 className="text-2xl font-bold text-white mb-6">Admin Portal</h2>
+                            {authError && <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-3 rounded-lg mb-6 text-left leading-relaxed">{authError}</div>}
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <input type="email" required value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="Email Admin" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                <input type="password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Password" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                <button type="submit" disabled={isLoggingIn} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+                                    {isLoggingIn ? <Icon name="loader" className="animate-spin" /> : <Icon name="log-in" />} {isLoggingIn ? 'Memproses...' : 'Login Admin'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    {/* Toast & Modals */}
+                    {toast && (
+                        <div className={`fixed top-4 right-4 z-[300] px-5 py-3 rounded-xl text-white flex items-center gap-3 text-sm font-bold shadow-2xl ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-500'}`}>
+                            <Icon name={toast.type === 'error' ? 'alert-circle' : 'check-circle'} size={18} /> {toast.message}
+                        </div>
+                    )}
+
+                    {confirmDelete && (
+                        <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
+                            <div className="bg-panel p-6 rounded-2xl w-full max-w-sm text-center shadow-2xl">
+                                <Icon name="alert-triangle" size={48} className="text-red-500 mx-auto mb-4" />
+                                <h3 className="text-xl font-bold text-white mb-2">Konfirmasi Hapus</h3>
+                                <p className="text-gray-400 text-sm mb-6">Tindakan ini tidak dapat dibatalkan.</p>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setConfirmDelete(null)} className="flex-1 py-3 bg-[#21262d] text-white rounded-xl">Batal</button>
+                                    <button onClick={executeDelete} className="flex-1 py-3 bg-red-600 text-white rounded-xl">Hapus</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Sidebar */}
+                    <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-panel border-r border-[#30363d] transform transition-transform md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                        <div className="p-4 border-b border-[#30363d] flex justify-between items-center">
+                            <span className="font-bold text-white flex items-center gap-2"><Icon name="shield" className="text-indigo-500"/> Admin Panel</span>
+                            <button onClick={() => setMobileMenuOpen(false)} className="md:hidden"><Icon name="x"/></button>
+                        </div>
+                        <div className="p-4 space-y-2">
+                            {menuItems.map(item => (
+                                <button key={item.id} onClick={() => { setActiveMenu(item.id); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${activeMenu === item.id ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-[#21262d]'}`}>
+                                    <Icon name={item.icon} size={18} /> {item.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="absolute bottom-0 w-full p-4 border-t border-[#30363d]">
+                            <button onClick={handleLogout} className="w-full py-2 bg-red-500/10 text-red-500 rounded-lg text-sm font-bold flex items-center justify-center gap-2 border border-red-500/20"><Icon name="log-out" size={16}/> Logout</button>
+                        </div>
+                    </div>
+
+                    {/* Main */}
+                    <div className="flex-1 flex flex-col h-screen overflow-y-auto">
+                        <header className="sticky top-0 z-40 bg-panel border-b border-[#30363d] p-4 flex justify-between items-center">
+                            <button onClick={() => setMobileMenuOpen(true)} className="md:hidden"><Icon name="menu"/></button>
+                            <h1 className="text-lg font-semibold text-white capitalize">{activeMenu.replace('-', ' ')}</h1>
+                            <span className="text-xs font-bold text-green-400 bg-green-400/10 px-3 py-1 rounded-full border border-green-400/20 flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div> Online
+                            </span>
+                        </header>
+
+                        <main className="p-4 md:p-8 max-w-5xl mx-auto w-full">
+                            {activeMenu === 'dashboard' && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="bg-panel p-6 rounded-2xl border border-[#30363d]"><p className="text-gray-400 text-xs">Ide Masuk</p><h3 className="text-3xl font-bold text-white mt-1">{ideas.length}</h3></div>
+                                    <div className="bg-panel p-6 rounded-2xl border border-[#30363d]"><p className="text-gray-400 text-xs">Project Aktif</p><h3 className="text-3xl font-bold text-white mt-1">{projects.length}</h3></div>
+                                    <div className="bg-panel p-6 rounded-2xl border border-[#30363d]"><p className="text-gray-400 text-xs">Foto Galeri</p><h3 className="text-3xl font-bold text-white mt-1">{gallery.length}</h3></div>
+                                </div>
+                            )}
+
+                            {}
+                            {activeMenu === 'project' && (
+                                <div className="space-y-6">
+                                    <div id="project-form-container">
+                                        <form onSubmit={handleProjectSubmit} className={`bg-panel border p-6 rounded-2xl space-y-4 ${editingProject ? 'border-amber-500/50' : 'border-[#30363d]'}`}>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <h3 className="font-bold text-white">{editingProject ? 'Edit Project' : 'Tambah Project Baru'}</h3>
+                                                {editingProject && <button type="button" onClick={cancelEditProject} className="text-xs text-gray-400 hover:text-white">Batal</button>}
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <input required value={projForm.title} onChange={e=>setProjForm({...projForm, title: e.target.value})} placeholder="Judul Project" className="bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                                
+                                                {/* NEW DEVELOPER FIELD */}
+                                                <input required value={projForm.developer} onChange={e=>setProjForm({...projForm, developer: e.target.value})} placeholder="Nama Developer (Wajib)" className="bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                            </div>
+
+                                            <textarea required value={projForm.desc} onChange={e=>setProjForm({...projForm, desc: e.target.value})} placeholder="Deskripsi Singkat" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm h-24"></textarea>
+                                            <input required value={projForm.demoUrl} onChange={e=>setProjForm({...projForm, demoUrl: e.target.value})} placeholder="Link Demo (https://...)" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                            <input required value={projForm.thumbnail} onChange={e=>setProjForm({...projForm, thumbnail: e.target.value})} placeholder="URL Link Gambar Thumbnail" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                            
+                                            <button type="submit" className={`w-full py-3 rounded-xl font-bold text-white transition ${editingProject ? 'bg-amber-600' : 'bg-indigo-600 shadow-lg shadow-indigo-600/20'}`}>
+                                                {editingProject ? 'Update Project' : 'Publish Project'}
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                    {}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {projects.map(p => (
+                                            <div key={p.id} className="bg-panel border border-[#30363d] p-5 rounded-2xl flex items-center justify-between group hover:border-indigo-500/50 transition-all">
+                                                <div className="flex-1 pr-4">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <h4 className="font-bold text-white truncate max-w-[150px]">{p.title}</h4>
+                                                        <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-500/20 font-medium">Project</span>
+                                                    </div>
+                                                    {/* Displaying Developer Name */}
+                                                    <p className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+                                                        <Icon name="user" size={12} className="text-gray-500" /> {p.developer || 'Unknown Developer'}
+                                                    </p>
+                                                    <a href={p.demoUrl} target="_blank" className="text-xs text-indigo-400 hover:underline flex items-center gap-1">
+                                                        <Icon name="external-link" size={12}/> Lihat Demo
+                                                    </a>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => editProject(p)} className="p-2 text-amber-400 bg-amber-400/5 rounded-lg border border-amber-400/10 hover:bg-amber-400/20 transition"><Icon name="edit" size={16}/></button>
+                                                    <button onClick={() => setConfirmDelete({collection: 'projects', id: p.id})} className="p-2 text-red-400 bg-red-400/5 rounded-lg border border-red-400/10 hover:bg-red-500/20 transition"><Icon name="trash-2" size={16}/></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* MODERASI IDE TAB */}
+                            {activeMenu === 'moderasi' && (
+                                <div className="space-y-4">
+                                    {ideas.map(idea => (
+                                        <div key={idea.id} className="bg-panel p-5 rounded-2xl border border-[#30363d]">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h3 className="font-bold text-white">{idea.sender}</h3>
+                                                    <span className={`text-[10px] px-2 py-1 rounded mt-2 inline-block font-bold uppercase tracking-widest ${
+                                                        idea.status === 'diterima' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                                                        idea.status === 'ditolak' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                                    }`}>{idea.status || 'pending'}</span>
+                                                </div>
+                                                <button onClick={() => setConfirmDelete({collection: 'ideas', id: idea.id})} className="text-gray-500 hover:text-red-400 transition"><Icon name="trash-2" size={18}/></button>
+                                            </div>
+                                            <p className="text-gray-300 text-sm mb-6 bg-[#0d1117] p-4 rounded-xl border border-[#30363d] leading-relaxed">{idea.description}</p>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => db.collection('ideas').doc(idea.id).update({status: 'diterima'}).then(()=>showToast('Ide diterima!'))} className="px-4 py-2 bg-green-500/10 text-green-500 text-[10px] font-bold uppercase rounded-lg border border-green-500/20 hover:bg-green-500/20">Terima</button>
+                                                <button onClick={() => db.collection('ideas').doc(idea.id).update({status: 'ditolak'}).then(()=>showToast('Ide ditolak!'))} className="px-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-bold uppercase rounded-lg border border-red-500/20 hover:bg-red-500/20">Tolak</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {ideas.length === 0 && <p className="text-center text-gray-500 py-12 italic">Tidak ada ide moderasi.</p>}
+                                </div>
+                            )}
+
+                            {/* GALERI TAB */}
+                            {activeMenu === 'galeri' && (
+                                <div className="space-y-6">
+                                    <div id="gallery-form-container">
+                                        <form onSubmit={handleGallerySubmit} className={`bg-panel border p-6 rounded-2xl space-y-4 ${editingGallery ? 'border-amber-500/50' : 'border-[#30363d]'}`}>
+                                            <h3 className="font-bold text-white mb-2">{editingGallery ? 'Edit Galeri' : 'Tambah Foto Baru'}</h3>
+                                            <input required value={galForm.caption} onChange={e=>setGalForm({...galForm, caption: e.target.value})} placeholder="Caption Singkat" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                            <input required value={galForm.photoUrl} onChange={e=>setGalForm({...galForm, photoUrl: e.target.value})} placeholder="URL Link Foto" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm"/>
+                                            <button type="submit" className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl transition">Publish Galeri</button>
+                                        </form>
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        {gallery.map(g => (
+                                            <div key={g.id} className="relative aspect-square bg-[#0d1117] rounded-xl overflow-hidden group border border-[#30363d]">
+                                                <img src={g.photoUrl} className="w-full h-full object-cover" />
+                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center gap-2 p-2">
+                                                    <p className="text-[10px] text-white text-center line-clamp-2 mb-2">{g.caption}</p>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => setConfirmDelete({collection: 'gallery', id: g.id})} className="p-2 bg-red-600 text-white rounded-lg"><Icon name="trash-2" size={14}/></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
